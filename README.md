@@ -1,17 +1,26 @@
 # Deep Research Agent
 
 A multi-agent **deep research assistant** with a [Gradio](https://www.gradio.app/) web UI, built on the
-[OpenAI Agents SDK](https://openai.github.io/openai-agents-python/). Give it a topic and it plans a set of
-web searches, runs them in parallel, synthesizes a long-form markdown report, and (optionally) emails the
-result to you.
+[OpenAI Agents SDK](https://openai.github.io/openai-agents-python/). Give it a topic and it first asks a
+few clarifying questions to sharpen the request, then plans targeted web searches, runs them in parallel,
+synthesizes a long-form markdown report, and emails the result to you.
 
 ## How it works
 
-The pipeline is orchestrated by `ResearchManager`, which coordinates four specialized agents:
+The app runs as a **two-step flow**. First you enter a query and the `ClarifyAgent` generates three
+clarifying questions. You answer them, and those answers feed the rest of the pipeline so the research
+stays focused on what you actually want.
+
+The pipeline is orchestrated by `ResearchManager`, which coordinates five specialized agents:
 
 ```
+  query ───▶ ┌──────────────┐
+             │ ClarifyAgent │  asks 3 clarifying questions
+             └──────┬───────┘
+                    │  ← user answers the questions
+                    ▼
              ┌──────────────┐
-  query ───▶ │ PlannerAgent │  decides which 5 web searches to run
+             │ PlannerAgent │  plans targeted searches from query + answers
              └──────┬───────┘
                     │  WebSearchPlan
                     ▼
@@ -32,20 +41,23 @@ The pipeline is orchestrated by `ResearchManager`, which coordinates four specia
 
 | Agent | File | Responsibility |
 |-------|------|----------------|
-| `PlannerAgent` | `planner_agent.py` | Turns the query into a structured plan of web searches |
+| `ClarifyAgent` | `clarify_agent.py` | Generates clarifying questions to narrow the query |
+| `PlannerAgent` | `planner_agent.py` | Turns the query + answers into a structured search plan |
 | `Search agent` | `search_agent.py` | Searches the web and summarizes each result |
 | `WriterAgent`  | `writer_agent.py`  | Writes a cohesive, long-form markdown report |
 | `Email agent`  | `email_agent.py`   | Formats and sends the report as an HTML email |
 
-Progress updates stream back to the Gradio UI live as each stage completes.
+Progress updates stream back to the Gradio UI live as each stage completes. The email step is
+non-fatal — if SendGrid isn't configured (or is out of credits), the report is still displayed.
 
 ## Project structure
 
 ```
 deep_research_agent/
 ├── src/deep_research_agent/
-│   ├── app.py               # Gradio UI + entry point (main)
+│   ├── app.py               # Gradio UI (two-step flow) + entry point (main)
 │   ├── research_manager.py  # Orchestrates the agent pipeline
+│   ├── clarify_agent.py
 │   ├── planner_agent.py
 │   ├── search_agent.py
 │   ├── writer_agent.py
@@ -86,7 +98,7 @@ deep_research_agent/
 
    | Variable | Required | Purpose |
    |----------|----------|---------|
-   | `OPENAI_API_KEY` | ✅ | Powers all four agents |
+   | `OPENAI_API_KEY` | ✅ | Powers all five agents |
    | `SENDGRID_API_KEY` | ⬜ | Sending the report email |
    | `MAIL_FROM_EMAIL` | ⬜ | Verified SendGrid sender address |
    | `MAIL_TO_EMAIL` | ⬜ | Where the report is emailed |
@@ -98,10 +110,14 @@ uv run deep-research
 ```
 
 This launches the Gradio app and opens it in your browser (default: <http://127.0.0.1:7860>).
-Enter a topic, hit **Run**, and watch the report build in real time.
+Then:
+
+1. **Step 1** — enter your topic and click **Get clarifying questions**.
+2. **Step 2** — the app shows three clarifying questions; type your answers.
+3. **Step 3** — click **Start research** and watch the report build in real time.
 
 > **Note:** Each run makes paid OpenAI API calls. If you haven't configured SendGrid, the research
-> and report steps still work — only the final email step will fail.
+> and report steps still work — only the final email step is skipped (the report still displays).
 
 ### Alternative: pip
 
