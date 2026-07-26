@@ -10,40 +10,48 @@ import asyncio
 class ResearchManager:
 
     async def run(self, query: str, clarification_answers: str | None = None):
-        """ Run the deep research process, yielding status updates and the final report.
+        """ Run the deep research process, yielding ``(kind, payload)`` events.
 
-        Called in two phases from the UI:
-        - `run(query)` (no answers) -> generate and yield clarifying questions, then stop.
-        - `run(query, answers)` -> plan, search, write the report, and email it.
+        ``kind`` is one of ``"status"`` (a short progress line), ``"questions"``
+        (the clarifying-questions markdown) or ``"report"`` (the final report).
+        The UI routes each kind to a different place, so progress never mixes
+        into the report.
+
+        Two phases:
+        - ``run(query)`` (no answers) -> emit clarifying questions, then stop.
+        - ``run(query, answers)`` -> plan, search, write the report, and email it.
         """
         trace_id = gen_trace_id()
         with trace("Deep research trace", trace_id=trace_id):
+            # Trace URL is developer info -> console only, kept out of the UI.
             print(f"View trace: https://platform.openai.com/traces/trace?trace_id={trace_id}")
-            yield f"View trace: https://platform.openai.com/traces/trace?trace_id={trace_id}"
 
             # Phase 1: no answers yet -> ask clarifying questions and wait for the user.
             if clarification_answers is None:
+                yield ("status", "Generating clarifying questions...")
                 clarifications = await self.clarify(query)
-                yield "**Clarifying questions:**\n" + "\n".join(f"- {q}" for q in clarifications.questions)
-                yield f"\n_Why these help: {clarifications.reasoning}_"
-                yield "\nPlease provide answers to the clarifying questions above, then click **Start research**."
+                questions_md = "\n".join(
+                    f"{i}. {q}" for i, q in enumerate(clarifications.questions, 1)
+                )
+                questions_md += f"\n\n> 💡 *{clarifications.reasoning}*"
+                yield ("questions", questions_md)
                 return
 
             # Phase 2: answers provided -> run the full research pipeline.
-            yield "Creating search strategy..."
+            yield ("status", "Planning targeted searches...")
             search_plan = await self.plan_searches(query, clarification_answers)
-            yield f"Search strategy: {search_plan.overall_strategy}"
 
-            yield "Searching the web..."
+            yield ("status", f"Searching the web ({len(search_plan.searches)} queries)...")
             search_results = await self.perform_searches(search_plan)
 
-            yield "Searches complete, writing report..."
+            yield ("status", "Synthesizing the report...")
             report = await self.write_report(query, clarification_answers, search_results)
 
-            yield "Report written, sending email..."
-            yield await self.send_email(report)
+            yield ("status", "Sending email...")
+            email_status = await self.send_email(report)
 
-            yield report.markdown_report
+            yield ("status", email_status)
+            yield ("report", report.markdown_report)
 
     async def clarify(self, query: str) -> ClarificationQuestions:
         """ Generate clarifying questions for the query """
